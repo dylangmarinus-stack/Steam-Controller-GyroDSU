@@ -26,6 +26,24 @@ Point your emulator at:
 
 Slot 0 = first controller, Slot 1 = second, etc.
 
+Puck controller channels are detected independently, even though they share the
+receiver's serial number. Empty channels do not occupy emulator slots.
+
+## Troubleshooting
+
+With the controller paired and awake, inspect detection and service logs:
+
+```sh
+"$HOME/SteamControllerGyroDSU/SteamControllerGyroDSU" --probe
+journalctl --user -u SteamControllerGyroDSU.service -b -n 40 --no-pager
+```
+
+The probe lists HID interfaces, not paired controllers. A puck can expose several
+controller channels plus a receiver control interface. A running service with
+`0.0 samples/s` is not receiving usable motion samples. The original v1.0.0
+release can repeatedly open an empty puck channel and skip the active one;
+it needs a build containing the HID-path detection fix.
+
 ## Works alongside SteamDeckGyroDSU
 
 Run [SteamDeckGyroDSU](https://github.com/kmicki/SteamDeckGyroDSU) on port `26760` to use the Steam Deck's built-in gyro at the same time as your Steam Controllers.

@@ -10,14 +10,14 @@ namespace sc2 {
 
 class HidSlot {
 public:
-    HidSlot(hid_device* dev, int dsuSlot, uint16_t pid, std::string serial);
+    HidSlot(hid_device* dev, int dsuSlot, uint16_t pid, std::string path);
     ~HidSlot();
     HidSlot(const HidSlot&) = delete;
     HidSlot& operator=(const HidSlot&) = delete;
     bool readOne(ControllerState& out);
     int         dsuSlot;
     uint16_t    pid;
-    std::string serial;
+    std::string path;
 private:
     void sendFeatureReport(uint8_t setting, uint16_t value);
     void refreshLizard();
@@ -33,11 +33,9 @@ class HidManager {
 public:
     HidManager();
     ~HidManager();
-    void scan(std::vector<std::unique_ptr<HidSlot>>& active, bool slotUsed[4]);
+    std::unique_ptr<HidSlot> openSlot(const hid_device_info& info, int slot);
+    static bool isControllerInterface(const hid_device_info& info);
     void probe();
-private:
-    static bool isActive(const std::vector<std::unique_ptr<HidSlot>>& active,
-                         const std::string& serial);
 };
 
 } // namespace sc2

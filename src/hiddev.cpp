@@ -8,8 +8,8 @@ using namespace std::chrono_literals;
 
 namespace sc2 {
 
-HidSlot::HidSlot(hid_device* dev, int dsuSlot, uint16_t pid, std::string serial)
-    : dsuSlot(dsuSlot), pid(pid), serial(std::move(serial)), dev_(dev)
+HidSlot::HidSlot(hid_device* dev, int dsuSlot, uint16_t pid, std::string path)
+    : dsuSlot(dsuSlot), pid(pid), path(std::move(path)), dev_(dev)
 {
     auto now = std::chrono::steady_clock::now();
     lastLizard_ = now - 10s;
@@ -109,39 +109,29 @@ bool HidSlot::readOne(ControllerState& out) {
 HidManager::HidManager() { hid_init(); }
 HidManager::~HidManager() { hid_exit(); }
 
-bool HidManager::isActive(const std::vector<std::unique_ptr<HidSlot>>& active,
-                           const std::string& serial) {
-    for (auto& s : active)
-        if (s->serial == serial) return true;
-    return false;
+bool HidManager::isControllerInterface(const hid_device_info& info) {
+    if (!isTritonPid(info.product_id) || info.usage_page < 0xFF00)
+        return false;
+    // Puck usage 2 is the receiver control interface, not a controller channel.
+    if (info.product_id == PID_PROTEUS_PUCK || info.product_id == PID_NEREID_PUCK)
+        return info.usage == 1;
+    return true;
 }
 
-void HidManager::scan(std::vector<std::unique_ptr<HidSlot>>& active, bool slotUsed[4]) {
-    struct hid_device_info* devs = hid_enumerate(VID_VALVE, 0);
-    struct hid_device_info* cur  = devs;
-    while (cur) {
-        if (isTritonPid(cur->product_id) && cur->usage_page >= 0xFF00) {
-            std::string serial = cur->serial_number
-                ? std::string(reinterpret_cast<const char*>(cur->serial_number),
-                              wcslen(cur->serial_number))
-                : std::string(cur->path);
-            if (!serial.empty() && !isActive(active, serial)) {
-                int slot = -1;
-                for (int i = 0; i < 4; ++i)
-                    if (!slotUsed[i]) { slot = i; break; }
-                if (slot >= 0) {
-                    hid_device* dev = hid_open_path(cur->path);
-                    if (dev) {
-                        slotUsed[slot] = true;
-                        active.push_back(std::make_unique<HidSlot>(
-                            dev, slot, cur->product_id, serial));
-                    }
-                }
-            }
-        }
-        cur = cur->next;
+std::unique_ptr<HidSlot> HidManager::openSlot(const hid_device_info& info, int slot) {
+    hid_device* dev = hid_open_path(info.path);
+    if (!dev) {
+        const wchar_t* error = hid_error(nullptr);
+        fprintf(stderr, "scanner: cannot open %s: %ls\n", info.path,
+                error ? error : L"unknown HID error");
+        return nullptr;
     }
-    hid_free_enumeration(devs);
+    auto candidate = std::make_unique<HidSlot>(dev, slot, info.product_id, info.path);
+    ControllerState initialState;
+    // Empty puck channels share the receiver serial and must not occupy DSU slots.
+    if (!candidate->readOne(initialState))
+        return nullptr;
+    return candidate;
 }
 
 void HidManager::probe() {
@@ -149,9 +139,9 @@ void HidManager::probe() {
     struct hid_device_info* devs = hid_enumerate(VID_VALVE, 0);
     struct hid_device_info* cur  = devs;
     while (cur) {
-        bool cand = isTritonPid(cur->product_id) && cur->usage_page >= 0xFF00;
-        fprintf(stderr, "  PID %04X usage_page=0x%04X path=%s%s\n",
-            cur->product_id, cur->usage_page, cur->path,
+        bool cand = isControllerInterface(*cur);
+        fprintf(stderr, "  PID %04X usage_page=0x%04X usage=0x%04X interface=%d path=%s%s\n",
+            cur->product_id, cur->usage_page, cur->usage, cur->interface_number, cur->path,
             cand ? "  <-- kandidaat" : "");
         cur = cur->next;
     }

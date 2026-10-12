@@ -33,8 +33,8 @@ static void slotReaderThread(HidSlot* slot, DsuServer* server, std::atomic<bool>
     auto     lastSample = std::chrono::steady_clock::now();
     uint32_t lastTs    = 0;
 
-    fprintf(stderr, "triton-%d: reader started (serial=%s)\n",
-            slot->dsuSlot, slot->serial.c_str());
+    fprintf(stderr, "triton-%d: reader started (path=%s)\n",
+            slot->dsuSlot, slot->path.c_str());
 
     while (!gShutdown && !done) {
         ControllerState state;
@@ -108,15 +108,10 @@ int main(int argc, char* argv[]) {
         struct hid_device_info* devs = hid_enumerate(VID_VALVE, 0);
         struct hid_device_info* cur  = devs;
         while (cur && !gShutdown) {
-            if (isTritonPid(cur->product_id) && cur->usage_page >= 0xFF00) {
-                std::string serial = cur->serial_number
-                    ? std::string(reinterpret_cast<const char*>(cur->serial_number),
-                                  wcslen(cur->serial_number))
-                    : std::string(cur->path);
-
+            if (HidManager::isControllerInterface(*cur)) {
                 bool already = false;
                 for (auto& r : readers)
-                    if (r->slot->serial == serial) { already = true; break; }
+                    if (r->slot->path == cur->path) { already = true; break; }
                 if (already) { cur = cur->next; continue; }
 
                 int slot = -1;
@@ -124,15 +119,15 @@ int main(int argc, char* argv[]) {
                     if (!slotUsed[i]) { slot = i; break; }
                 if (slot < 0) { cur = cur->next; continue; }
 
-                hid_device* dev = hid_open_path(cur->path);
-                if (!dev) { cur = cur->next; continue; }
+                auto candidate = manager.openSlot(*cur, slot);
+                if (!candidate) { cur = cur->next; continue; }
 
-                fprintf(stderr, "scanner: PID %04X (%s) serial=%s → slot %d\n",
-                    cur->product_id, pidLabel(cur->product_id), serial.c_str(), slot);
+                fprintf(stderr, "scanner: PID %04X (%s) path=%s → slot %d\n",
+                    cur->product_id, pidLabel(cur->product_id), cur->path, slot);
 
                 slotUsed[slot] = true;
                 auto reader = std::make_unique<SlotReader>();
-                reader->slot = std::make_unique<HidSlot>(dev, slot, cur->product_id, serial);
+                reader->slot = std::move(candidate);
                 HidSlot* slotPtr = reader->slot.get();
                 std::atomic<bool>& doneRef = reader->done;
                 reader->thread = std::thread([slotPtr, &server, &doneRef](){

@@ -22,3 +22,11 @@ target_link_libraries(sc2gyrodsu PRIVATE
     ${HIDAPI_LIB}
 )
 target_compile_options(sc2gyrodsu PRIVATE -O3 -Wall)
+
+include(CTest)
+if(BUILD_TESTING)
+    add_executable(hiddev_test tests/hiddev_test.cpp src/hiddev.cpp src/triton.cpp)
+    target_include_directories(hiddev_test PRIVATE inc ${HIDAPI_INC})
+    target_compile_options(hiddev_test PRIVATE -Wall)
+    add_test(NAME hiddev COMMAND hiddev_test)
+endif()
